@@ -469,6 +469,72 @@ async function selectDandiset(dandisetId, { pushState = true } = {}) {
 
   // Update right panel to show dandiset info
   updateDandisetPanel(dandisetId, structureIds);
+
+  // Filter the left panel tree to highlight matching regions
+  filterTreeByDandiset(dandisetId);
+}
+
+function filterTreeByDandiset(dandisetId) {
+  const structureIds = dandisetToStructures[dandisetId] || [];
+  const activeIds = new Set(structureIds);
+
+  // Add all ancestors so tree paths remain visible
+  for (const sid of structureIds) {
+    let current = idToStructure[sid]?.parent_structure_id;
+    while (current != null) {
+      activeIds.add(current);
+      current = idToStructure[current]?.parent_structure_id;
+    }
+  }
+
+  // Show the filter bar
+  const filterBar = document.getElementById('dandiset-filter-bar');
+  const filterLabel = document.getElementById('dandiset-filter-label');
+  filterBar.classList.remove('hidden');
+  filterLabel.textContent = `Dandiset ${dandisetId}`;
+
+  // Expand tree paths to matching nodes so they're visible
+  for (const sid of structureIds) {
+    expandToNode(sid);
+  }
+
+  // Apply dandiset-inactive class to tree nodes NOT in the active set
+  const container = document.getElementById('hierarchy-tree');
+  container.querySelectorAll('.tree-node').forEach(node => {
+    const id = parseInt(node.dataset.id);
+    const label = node.querySelector(':scope > .tree-node-content .tree-label');
+    const dot = node.querySelector(':scope > .tree-node-content .tree-color-dot');
+    if (!activeIds.has(id)) {
+      if (label) label.classList.add('dandiset-inactive');
+      if (dot) dot.classList.add('dandiset-inactive');
+    } else {
+      if (label) label.classList.remove('dandiset-inactive');
+      if (dot) dot.classList.remove('dandiset-inactive');
+    }
+  });
+}
+
+function clearDandisetFilter() {
+  // Hide filter bar
+  document.getElementById('dandiset-filter-bar').classList.add('hidden');
+
+  // Remove dandiset-inactive class from all tree nodes
+  const container = document.getElementById('hierarchy-tree');
+  container.querySelectorAll('.dandiset-inactive').forEach(el => {
+    el.classList.remove('dandiset-inactive');
+  });
+
+  // Restore 3D view
+  showAllRegions();
+  selectedDandiset = null;
+  selectedId = null;
+
+  // Clear URL hash
+  history.pushState(null, '', window.location.pathname);
+
+  // Reset right panel
+  document.getElementById('region-panel').innerHTML =
+    '<p class="placeholder-text">Click a brain region to view details and associated DANDI datasets.</p>';
 }
 
 function updateDandisetPanel(dandisetId, structureIds) {
@@ -565,9 +631,10 @@ function updateRegionPanel(structureId) {
   const acronym = region ? region.acronym : s.acronym;
   const color = region ? region.color_hex_triplet : (s.color_hex_triplet || 'aaaaaa');
 
+  const atlasUrl = `https://atlas.brain-map.org/atlas#atlas=2&structure=${structureId}`;
   let html = `
     <div class="region-header">
-      <div class="region-name">${name}</div>
+      <div class="region-name">${name} <a class="region-ext-link" href="${atlasUrl}" target="_blank" rel="noopener" title="View on Allen Brain Atlas">&#8599;</a></div>
       <div class="region-acronym">${acronym}</div>
       <div class="region-color-bar" style="background: #${color}"></div>
     </div>
@@ -690,8 +757,8 @@ function createTreeNode(node, depth) {
   let labelClass = hasData ? 'has-data' : 'no-data';
   if (hasData && !hasMesh) labelClass += ' no-mesh';
   label.className = `tree-label ${labelClass}`;
-  label.textContent = node.acronym || node.name;
-  label.title = node.name + (hasData && !hasMesh ? ' (no 3D mesh available)' : '');
+  label.textContent = node.acronym ? `${node.name} (${node.acronym})` : node.name;
+  label.title = hasData && !hasMesh ? `${node.name} (no 3D mesh available)` : node.name;
 
   content.appendChild(toggle);
   content.appendChild(dot);
@@ -964,6 +1031,9 @@ function setupResize() {
 
 setupResize();
 
+// ── Dandiset Filter Clear Button ────────────────────────────────────────────
+document.getElementById('dandiset-filter-clear').addEventListener('click', clearDandisetFilter);
+
 // ── URL Hash State ──────────────────────────────────────────────────────────
 function setHash(hash) {
   history.pushState(null, '', '#' + hash);
@@ -979,6 +1049,11 @@ function applyHashState() {
       const prevEl = document.querySelector('.tree-node-content.selected');
       if (prevEl) prevEl.classList.remove('selected');
       showAllRegions();
+      // Clear dandiset filter bar
+      document.getElementById('dandiset-filter-bar').classList.add('hidden');
+      document.getElementById('hierarchy-tree').querySelectorAll('.dandiset-inactive').forEach(el => {
+        el.classList.remove('dandiset-inactive');
+      });
       document.getElementById('region-panel').innerHTML =
         '<p class="placeholder-text">Click a brain region to view details and associated DANDI datasets.</p>';
     }
