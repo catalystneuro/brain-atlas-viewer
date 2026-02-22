@@ -18,6 +18,7 @@ const CAM_DIST = 18000;
 // Sets for quick lookups
 let dataStructureIds = new Set();
 let ancestorStructureIds = new Set();
+let noMeshIds = new Set();
 
 // ── Initialization ─────────────────────────────────────────────────────────
 async function init() {
@@ -35,6 +36,7 @@ async function init() {
 
   dataStructureIds = new Set(meshManifest.data_structures);
   ancestorStructureIds = new Set(meshManifest.ancestor_structures);
+  noMeshIds = new Set(meshManifest.no_mesh || []);
 
   // Build flat lookup from the tree
   flattenTree(structureGraph);
@@ -114,6 +116,7 @@ function onResize() {
 
 // ── Mesh Loading ───────────────────────────────────────────────────────────
 const objLoader = new OBJLoader();
+const failedMeshIds = new Set();
 
 function loadMesh(structureId) {
   return new Promise((resolve) => {
@@ -188,9 +191,15 @@ function loadMesh(structureId) {
         resolve(mesh);
       },
       undefined,
-      () => resolve(null)
+      () => { failedMeshIds.add(structureId); resolve(null); }
     );
   });
+}
+
+async function ensureMeshLoaded(structureId) {
+  if (meshObjects[structureId]) return meshObjects[structureId];
+  if (failedMeshIds.has(structureId)) return null;
+  return loadMesh(structureId);
 }
 
 async function loadInitialMeshes() {
@@ -221,10 +230,6 @@ async function loadInitialMeshes() {
   }
 }
 
-async function ensureMeshLoaded(structureId) {
-  if (meshObjects[structureId]) return meshObjects[structureId];
-  return loadMesh(structureId);
-}
 
 // ── Raycasting & Interaction ───────────────────────────────────────────────
 function onMouseMove(event) {
@@ -323,13 +328,14 @@ function getDescendantIds(structureId) {
 }
 
 function applyDimmed(mesh) {
-  mesh.material = new THREE.MeshPhongMaterial({
-    color: 0x666666,
-    transparent: true,
-    opacity: 0.03,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
+  const mat = mesh.userData.originalMaterial.clone();
+  mat.color.set(0x666666);
+  mat.transparent = true;
+  mat.opacity = 0.03;
+  mat.depthWrite = false;
+  mat.wireframe = false;
+  mat.needsUpdate = true;
+  mesh.material = mat;
   mesh.userData.isDimmed = true;
 }
 
@@ -354,9 +360,9 @@ function findNearestAncestorWithMesh(structureId) {
 function isolateRegion(structureId) {
   const activeIds = getDescendantIds(structureId);
 
-  // If the selected structure has no mesh, also include its nearest ancestor with a mesh
+  // If the selected structure has no loaded mesh, show nearest ancestor that does
   let fallbackId = null;
-  if (!meshObjects[structureId] && !dataStructureIds.has(structureId)) {
+  if (!meshObjects[structureId]) {
     fallbackId = findNearestAncestorWithMesh(structureId);
     if (fallbackId) activeIds.add(fallbackId);
   }
@@ -375,10 +381,12 @@ function isolateRegion(structureId) {
 }
 
 function applyIsolation(selectedStructureId, activeIds, fallbackId) {
+  // Only show the selected (or fallback) mesh; dim everything else
+  const showId = meshObjects[selectedStructureId] ? selectedStructureId : fallbackId;
   for (const [idStr, mesh] of Object.entries(meshObjects)) {
     const id = parseInt(idStr);
-    if (id === selectedStructureId || id === fallbackId) {
-      // Selected region (or fallback ancestor): full color, full opacity
+    if (id === showId) {
+      // Selected region: full color, full opacity
       const orig = mesh.userData.originalMaterial;
       const mat = orig.clone();
       mat.opacity = 1.0;
@@ -387,13 +395,7 @@ function applyIsolation(selectedStructureId, activeIds, fallbackId) {
       mat.needsUpdate = true;
       mesh.material = mat;
       mesh.userData.isDimmed = false;
-    } else if (activeIds.has(id)) {
-      // Descendants of selected: normal colored appearance
-      mesh.material = mesh.userData.originalMaterial.clone();
-      mesh.material.needsUpdate = true;
-      mesh.userData.isDimmed = false;
     } else {
-      // Everything else: very transparent gray
       applyDimmed(mesh);
     }
   }
@@ -524,6 +526,7 @@ function createTreeNode(node, depth) {
   const hasChildren = node.children && node.children.length > 0;
   const region = dandiRegions[String(node.id)];
   const hasData = !!region;
+  const hasMesh = !noMeshIds.has(node.id);
   const color = node.color_hex_triplet || 'aaaaaa';
 
   // Content row
@@ -537,17 +540,24 @@ function createTreeNode(node, depth) {
   toggle.className = `tree-toggle ${hasChildren ? '' : 'leaf'}`;
   toggle.textContent = '\u25B6'; // right triangle
 
-  // Color dot
+  // Color dot — hollow ring if no mesh
   const dot = document.createElement('span');
   dot.className = 'tree-color-dot';
-  dot.style.background = `#${color}`;
+  if (hasData && !hasMesh) {
+    dot.style.background = 'transparent';
+    dot.style.border = `2px solid #${color}`;
+  } else {
+    dot.style.background = `#${color}`;
+  }
   if (!hasData) dot.style.opacity = '0.3';
 
   // Label
   const label = document.createElement('span');
-  label.className = `tree-label ${hasData ? 'has-data' : 'no-data'}`;
+  let labelClass = hasData ? 'has-data' : 'no-data';
+  if (hasData && !hasMesh) labelClass += ' no-mesh';
+  label.className = `tree-label ${labelClass}`;
   label.textContent = node.acronym || node.name;
-  label.title = node.name;
+  label.title = node.name + (hasData && !hasMesh ? ' (no 3D mesh available)' : '');
 
   content.appendChild(toggle);
   content.appendChild(dot);

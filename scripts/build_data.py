@@ -232,6 +232,7 @@ def main():
     downloaded = 0
     failed = 0
     skipped = 0
+    failed_ids = []
     for i, sid in enumerate(sorted(all_mesh_ids)):
         dest = MESHES_DIR / f"{sid}.obj"
         if dest.exists():
@@ -243,6 +244,7 @@ def main():
             downloaded += 1
         else:
             failed += 1
+            failed_ids.append(sid)
 
         # Progress indicator
         if (i + 1) % 50 == 0:
@@ -259,10 +261,17 @@ def main():
         f"  Done: {downloaded} downloaded, {skipped} already existed, {failed} failed"
     )
 
+    # Also check for previously failed meshes (already missing on disk)
+    for sid in sorted(all_mesh_ids):
+        dest = MESHES_DIR / f"{sid}.obj"
+        if not dest.exists() and sid not in failed_ids:
+            failed_ids.append(sid)
+
     # 7. Save a mesh manifest (so the frontend knows which meshes are available)
     mesh_manifest = {
         "data_structures": sorted(data_structure_ids),
         "ancestor_structures": sorted(ancestor_ids - data_structure_ids),
+        "no_mesh": sorted(failed_ids),
         "root_id": 997,
     }
     manifest_path = DATA_DIR / "mesh_manifest.json"

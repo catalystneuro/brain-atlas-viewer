@@ -190,6 +190,14 @@ body {
   color: var(--text-dim);
 }
 
+.tree-label.no-mesh {
+  font-style: italic;
+}
+
+.tree-color-dot {
+  box-sizing: border-box;
+}
+
 .tree-badge {
   background: rgba(40, 40, 60, 0.8);
   color: white;
