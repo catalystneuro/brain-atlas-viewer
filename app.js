@@ -738,9 +738,12 @@ function updateRegionPanel(structureId) {
           const regionCount = (dandisetToStructures[did] || []).length;
           html += `
             <div class="dandiset-card" data-dandiset-id="${did}">
-              <span class="dandiset-card-id">${did}</span>
-              <span class="dandiset-card-count">${regionCount} region${regionCount !== 1 ? 's' : ''}</span>
-              <a class="dandiset-card-ext" href="https://dandiarchive.org/dandiset/${did}" target="_blank" rel="noopener" title="Open on DANDI Archive">&#8599;</a>
+              <div class="dandiset-card-top">
+                <span class="dandiset-card-id">${did}</span>
+                <span class="dandiset-card-count">${regionCount} region${regionCount !== 1 ? 's' : ''}</span>
+                <a class="dandiset-card-ext" href="https://dandiarchive.org/dandiset/${did}" target="_blank" rel="noopener" title="Open on DANDI Archive">&#8599;</a>
+              </div>
+              <div class="dandiset-card-title" data-dandiset-id="${did}">${dandisetTitles[did] || ''}</div>
             </div>`;
         }
       }
