@@ -20,6 +20,7 @@ let dataStructureIds = new Set();
 let ancestorStructureIds = new Set();
 let noMeshIds = new Set();
 let dandisetToStructures = {};  // dandiset_id -> [structure_ids]
+let dandisetTitles = {};        // dandiset_id -> title string
 let selectedDandiset = null;
 
 // ── Initialization ─────────────────────────────────────────────────────────
@@ -65,12 +66,52 @@ async function init() {
   // Restore view from URL hash, or listen for changes
   applyHashState();
   window.addEventListener('hashchange', () => applyHashState());
+
+  // Fetch dandiset titles in background (non-blocking)
+  fetchDandisetTitles();
 }
 
 function flattenTree(nodes) {
   for (const node of nodes) {
     idToStructure[node.id] = node;
     if (node.children) flattenTree(node.children);
+  }
+}
+
+async function fetchDandisetTitles() {
+  const ids = Object.keys(dandisetToStructures);
+  const batchSize = 10;
+  for (let i = 0; i < ids.length; i += batchSize) {
+    const batch = ids.slice(i, i + batchSize);
+    await Promise.all(batch.map(async (did) => {
+      try {
+        const resp = await fetch(`https://api.dandiarchive.org/api/dandisets/${did}/`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const title = data.draft_version?.name || data.most_recent_published_version?.name;
+        if (title) dandisetTitles[did] = title;
+      } catch { /* skip failures silently */ }
+    }));
+    // After each batch, refresh any currently-displayed dandiset info
+    refreshDandisetDisplays();
+  }
+}
+
+function refreshDandisetDisplays() {
+  // Update dandiset card titles in the right panel
+  document.querySelectorAll('.dandiset-card-title').forEach(el => {
+    const did = el.dataset.dandisetId;
+    if (dandisetTitles[did]) el.textContent = dandisetTitles[did];
+  });
+  // Update dandiset detail panel title if viewing a dandiset
+  const detailTitle = document.getElementById('dandiset-detail-title');
+  if (detailTitle && selectedDandiset && dandisetTitles[selectedDandiset]) {
+    detailTitle.textContent = dandisetTitles[selectedDandiset];
+  }
+  // Update filter bar label
+  const filterLabel = document.getElementById('dandiset-filter-label');
+  if (filterLabel && selectedDandiset && dandisetTitles[selectedDandiset]) {
+    filterLabel.textContent = `${dandisetTitles[selectedDandiset]} (${selectedDandiset})`;
   }
 }
 
@@ -491,7 +532,9 @@ function filterTreeByDandiset(dandisetId) {
   const filterBar = document.getElementById('dandiset-filter-bar');
   const filterLabel = document.getElementById('dandiset-filter-label');
   filterBar.classList.remove('hidden');
-  filterLabel.textContent = `Dandiset ${dandisetId}`;
+  filterLabel.textContent = dandisetTitles[dandisetId]
+    ? `${dandisetTitles[dandisetId]} (${dandisetId})`
+    : `Dandiset ${dandisetId}`;
 
   // Expand tree paths to matching nodes so they're visible
   for (const sid of structureIds) {
@@ -505,11 +548,11 @@ function filterTreeByDandiset(dandisetId) {
     const label = node.querySelector(':scope > .tree-node-content .tree-label');
     const dot = node.querySelector(':scope > .tree-node-content .tree-color-dot');
     if (!activeIds.has(id)) {
-      if (label) label.classList.add('dandiset-inactive');
-      if (dot) dot.classList.add('dandiset-inactive');
+      if (label) { label.classList.add('dandiset-inactive'); label.classList.remove('dandiset-active'); }
+      if (dot) { dot.classList.add('dandiset-inactive'); dot.classList.remove('dandiset-active'); }
     } else {
-      if (label) label.classList.remove('dandiset-inactive');
-      if (dot) dot.classList.remove('dandiset-inactive');
+      if (label) { label.classList.remove('dandiset-inactive'); label.classList.add('dandiset-active'); }
+      if (dot) { dot.classList.remove('dandiset-inactive'); dot.classList.add('dandiset-active'); }
     }
   });
 }
@@ -518,10 +561,13 @@ function clearDandisetFilter() {
   // Hide filter bar
   document.getElementById('dandiset-filter-bar').classList.add('hidden');
 
-  // Remove dandiset-inactive class from all tree nodes
+  // Remove dandiset filter classes from all tree nodes
   const container = document.getElementById('hierarchy-tree');
   container.querySelectorAll('.dandiset-inactive').forEach(el => {
     el.classList.remove('dandiset-inactive');
+  });
+  container.querySelectorAll('.dandiset-active').forEach(el => {
+    el.classList.remove('dandiset-active');
   });
 
   // Restore 3D view
@@ -540,9 +586,11 @@ function clearDandisetFilter() {
 function updateDandisetPanel(dandisetId, structureIds) {
   const panel = document.getElementById('region-panel');
 
+  const title = dandisetTitles[dandisetId] || '';
   let html = `
     <div class="region-header">
       <div class="region-name">Dandiset ${dandisetId}</div>
+      <div class="dandiset-detail-title" id="dandiset-detail-title">${title}</div>
       <a class="dandiset-external-link" href="https://dandiarchive.org/dandiset/${dandisetId}" target="_blank" rel="noopener">
         View on DANDI Archive &#8599;
       </a>
@@ -672,9 +720,12 @@ function updateRegionPanel(structureId) {
         const regionCount = (dandisetToStructures[did] || []).length;
         html += `
           <div class="dandiset-card" data-dandiset-id="${did}">
-            <span class="dandiset-card-id">${did}</span>
-            <span class="dandiset-card-count">${regionCount} region${regionCount !== 1 ? 's' : ''}</span>
-            <a class="dandiset-card-ext" href="https://dandiarchive.org/dandiset/${did}" target="_blank" rel="noopener" title="Open on DANDI Archive">&#8599;</a>
+            <div class="dandiset-card-top">
+              <span class="dandiset-card-id">${did}</span>
+              <span class="dandiset-card-count">${regionCount} region${regionCount !== 1 ? 's' : ''}</span>
+              <a class="dandiset-card-ext" href="https://dandiarchive.org/dandiset/${did}" target="_blank" rel="noopener" title="Open on DANDI Archive">&#8599;</a>
+            </div>
+            <div class="dandiset-card-title" data-dandiset-id="${did}">${dandisetTitles[did] || ''}</div>
           </div>`;
       }
     }
@@ -1051,9 +1102,9 @@ function applyHashState() {
       showAllRegions();
       // Clear dandiset filter bar
       document.getElementById('dandiset-filter-bar').classList.add('hidden');
-      document.getElementById('hierarchy-tree').querySelectorAll('.dandiset-inactive').forEach(el => {
-        el.classList.remove('dandiset-inactive');
-      });
+      const tree = document.getElementById('hierarchy-tree');
+      tree.querySelectorAll('.dandiset-inactive').forEach(el => el.classList.remove('dandiset-inactive'));
+      tree.querySelectorAll('.dandiset-active').forEach(el => el.classList.remove('dandiset-active'));
       document.getElementById('region-panel').innerHTML =
         '<p class="placeholder-text">Click a brain region to view details and associated DANDI datasets.</p>';
     }
