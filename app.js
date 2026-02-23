@@ -23,22 +23,27 @@ let dandisetToStructures = {};  // dandiset_id -> [structure_ids]
 let dandisetTitles = {};        // dandiset_id -> title string
 let dandisetAssets = {};        // dandiset_id -> [{path, asset_id, regions}]
 let selectedDandiset = null;
+let dandisetElectrodes = {};  // dandiset_id -> {subject_dir: [[x,y,z], ...]}
+let electrodePoints = null;   // THREE.Points object
+let regionAlpha = 1;          // global opacity multiplier for brain meshes
 
 // ── Initialization ─────────────────────────────────────────────────────────
 async function init() {
   updateLoadingText('Fetching data...');
 
-  const [graphResp, regionsResp, manifestResp, assetsResp] = await Promise.all([
+  const [graphResp, regionsResp, manifestResp, assetsResp, electrodesResp] = await Promise.all([
     fetch('data/structure_graph.json').then(r => r.json()),
     fetch('data/dandi_regions.json').then(r => r.json()),
     fetch('data/mesh_manifest.json').then(r => r.json()),
     fetch('data/dandiset_assets.json').then(r => r.json()),
+    fetch('data/dandiset_electrodes.json').then(r => r.json()).catch(() => ({})),
   ]);
 
   structureGraph = graphResp;
   dandiRegions = regionsResp;
   meshManifest = manifestResp;
   dandisetAssets = assetsResp;
+  dandisetElectrodes = electrodesResp;
 
   dataStructureIds = new Set(meshManifest.data_structures);
   ancestorStructureIds = new Set(meshManifest.ancestor_structures);
@@ -395,6 +400,8 @@ function applyDimmed(mesh) {
 function restoreOriginal(mesh) {
   if (mesh.userData.originalMaterial) {
     mesh.material = mesh.userData.originalMaterial.clone();
+    mesh.material.opacity *= regionAlpha;
+    mesh.material.transparent = mesh.material.opacity < 1;
     mesh.material.needsUpdate = true;
   }
   mesh.visible = true;
@@ -404,9 +411,9 @@ function restoreOriginal(mesh) {
 function applyActive(mesh) {
   const orig = mesh.userData.originalMaterial;
   const mat = orig.clone();
-  mat.opacity = 1.0;
-  mat.transparent = false;
-  mat.depthWrite = true;
+  mat.opacity = regionAlpha;
+  mat.transparent = regionAlpha < 1;
+  mat.depthWrite = regionAlpha >= 1;
   mat.needsUpdate = true;
   mesh.material = mat;
   mesh.visible = true;
@@ -468,6 +475,7 @@ function showAllRegions() {
 async function selectDandiset(dandisetId, { pushState = true } = {}) {
   selectedDandiset = dandisetId;
   selectedId = null;
+  clearElectrodePoints();
 
   // Update URL hash
   if (pushState) {
@@ -564,6 +572,7 @@ function clearDandisetFilter() {
   // Hide filter bars
   document.getElementById('dandiset-filter-bar').classList.add('hidden');
   hideSubjectFilter();
+  clearElectrodePoints();
 
   // Remove dandiset filter classes from all tree nodes
   const container = document.getElementById('hierarchy-tree');
@@ -675,8 +684,10 @@ function updateDandisetPanel(dandisetId, structureIds) {
         const regionIds = JSON.stringify([...entry.regions.keys()]);
         const dandiFilesUrl = `https://dandiarchive.org/dandiset/${dandisetId}/draft/files?location=${encodeURIComponent(entry.subjectDir)}`;
         const regionCount = entry.regions.size;
+        const hasElectrodes = dandisetElectrodes[dandisetId]?.[entry.subjectDir]?.length > 0;
 
-        html += `<div class="asset-card" data-region-ids='${regionIds}'>`;
+        html += `<div class="asset-card" data-region-ids='${regionIds}' data-subject-dir="${entry.subjectDir}">`;
+        if (hasElectrodes) html += `<span class="electrode-indicator" title="Has electrode coordinates"></span>`;
         html += `<span class="asset-card-filename">${subjectId}</span>`;
         html += `<span class="asset-card-region-count">${regionCount} region${regionCount !== 1 ? 's' : ''}</span>`;
         html += `<a class="asset-card-ext" href="${dandiFilesUrl}" target="_blank" rel="noopener" title="View on DANDI Archive">&#8599;</a>`;
@@ -707,10 +718,20 @@ function updateDandisetPanel(dandisetId, structureIds) {
         if (card.dataset.all) {
           filterTreeByDandiset(dandisetId);
           hideSubjectFilter();
+          clearElectrodePoints();
+          setHash(`dandiset=${dandisetId}`);
         } else {
           const subjectName = card.querySelector('.asset-card-filename')?.textContent || '';
           filterTreeByStructureIds(regionIds);
           showSubjectFilter(subjectName);
+          const subjectDir = card.dataset.subjectDir;
+          if (subjectDir) {
+            showElectrodePoints(dandisetId, subjectDir);
+            setHash(`dandiset=${dandisetId}&subject=${subjectDir}`);
+          } else {
+            clearElectrodePoints();
+            setHash(`dandiset=${dandisetId}`);
+          }
         }
         isolateStructureIds(regionIds);
 
@@ -797,6 +818,72 @@ async function isolateStructureIds(structureIds) {
   }
 }
 
+function selectSubjectByDir(dandisetId, subjectDir) {
+  const panel = document.getElementById('region-panel');
+  const card = panel.querySelector(`.asset-card[data-subject-dir="${subjectDir}"]`);
+  if (!card) return;
+  const regionIds = JSON.parse(card.dataset.regionIds || '[]');
+  const subjectName = card.querySelector('.asset-card-filename')?.textContent || '';
+  filterTreeByStructureIds(regionIds);
+  showSubjectFilter(subjectName);
+  showElectrodePoints(dandisetId, subjectDir);
+  isolateStructureIds(regionIds);
+  panel.querySelectorAll('.asset-card').forEach(c => c.classList.remove('asset-card-selected'));
+  card.classList.add('asset-card-selected');
+}
+
+// ── Electrode Points ───────────────────────────────────────────────────────
+function showElectrodePoints(dandisetId, subjectDir) {
+  clearElectrodePoints();
+  const subjects = dandisetElectrodes[dandisetId];
+  if (!subjects) return;
+  const coords = subjects[subjectDir];
+  if (!coords || coords.length === 0) return;
+
+  // Detect coordinate unit: Allen CCF is in micrometers (max ~13200).
+  // Some NWB files store coords in 10µm voxel units (max ~1320).
+  let scale = 1;
+  let maxVal = 0;
+  for (const c of coords) {
+    for (let j = 0; j < 3; j++) {
+      if (Math.abs(c[j]) > maxVal) maxVal = Math.abs(c[j]);
+    }
+  }
+  if (maxVal > 100 && maxVal < 1500) scale = 10;
+
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(coords.length * 3);
+  for (let i = 0; i < coords.length; i++) {
+    positions[i * 3] = coords[i][0] * scale;
+    positions[i * 3 + 1] = coords[i][1] * scale;
+    positions[i * 3 + 2] = coords[i][2] * scale;
+  }
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  const alphaSlider = document.getElementById('electrode-alpha');
+  const material = new THREE.PointsMaterial({
+    color: 0xff4466,
+    size: 150,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: parseFloat(alphaSlider.value),
+  });
+
+  electrodePoints = new THREE.Points(geometry, material);
+  scene.add(electrodePoints);
+  document.getElementById('electrode-control-row').classList.remove('hidden');
+}
+
+function clearElectrodePoints() {
+  if (electrodePoints) {
+    scene.remove(electrodePoints);
+    electrodePoints.geometry.dispose();
+    electrodePoints.material.dispose();
+    electrodePoints = null;
+  }
+  document.getElementById('electrode-control-row').classList.add('hidden');
+}
+
 function selectRegion(structureId, { expandTree = true, pushState = true } = {}) {
   // Deselect previous
   if (selectedId !== null) {
@@ -807,6 +894,7 @@ function selectRegion(structureId, { expandTree = true, pushState = true } = {})
 
   selectedId = structureId;
   selectedDandiset = null;
+  clearElectrodePoints();
 
   // Update URL hash
   if (pushState) {
@@ -1260,12 +1348,32 @@ function setupResize() {
 
 setupResize();
 
+// ── Alpha Sliders ───────────────────────────────────────────────────────────
+document.getElementById('electrode-alpha').addEventListener('input', (e) => {
+  if (electrodePoints) {
+    electrodePoints.material.opacity = parseFloat(e.target.value);
+  }
+});
+
+document.getElementById('region-alpha').addEventListener('input', (e) => {
+  regionAlpha = parseFloat(e.target.value);
+  for (const mesh of Object.values(meshObjects)) {
+    const orig = mesh.userData.originalMaterial;
+    if (!orig || mesh.userData.isDimmed) continue;
+    mesh.material.opacity = orig.opacity * regionAlpha;
+    mesh.material.transparent = mesh.material.opacity < 1;
+    mesh.material.needsUpdate = true;
+  }
+});
+
 // ── Dandiset Filter Clear Button ────────────────────────────────────────────
 document.getElementById('dandiset-filter-clear').addEventListener('click', clearDandisetFilter);
 document.getElementById('subject-filter-clear').addEventListener('click', () => {
   hideSubjectFilter();
+  clearElectrodePoints();
   // Restore to full dandiset view
   if (selectedDandiset) {
+    setHash(`dandiset=${selectedDandiset}`);
     filterTreeByDandiset(selectedDandiset);
     const structureIds = dandisetToStructures[selectedDandiset] || [];
     isolateStructureIds(structureIds);
@@ -1282,13 +1390,14 @@ function setHash(hash) {
   history.pushState(null, '', '#' + hash);
 }
 
-function applyHashState() {
+async function applyHashState() {
   const hash = location.hash.slice(1); // remove '#'
   if (!hash) {
     // No hash — show default view
     if (selectedId !== null || selectedDandiset !== null) {
       selectedId = null;
       selectedDandiset = null;
+      clearElectrodePoints();
       const prevEl = document.querySelector('.tree-node-content.selected');
       if (prevEl) prevEl.classList.remove('selected');
       showAllRegions();
@@ -1303,15 +1412,19 @@ function applyHashState() {
     return;
   }
 
-  const [key, value] = hash.split('=');
-  if (key === 'region' && value) {
-    const sid = parseInt(value);
+  const params = Object.fromEntries(hash.split('&').map(p => p.split('=')));
+  if (params.region) {
+    const sid = parseInt(params.region);
     if (idToStructure[sid]) {
       selectRegion(sid, { expandTree: true, pushState: false });
     }
-  } else if (key === 'dandiset' && value) {
-    if (dandisetToStructures[value]) {
-      selectDandiset(value, { pushState: false });
+  } else if (params.dandiset) {
+    const did = params.dandiset;
+    if (dandisetToStructures[did]) {
+      await selectDandiset(did, { pushState: false });
+      if (params.subject) {
+        selectSubjectByDir(did, params.subject);
+      }
     }
   }
 }
