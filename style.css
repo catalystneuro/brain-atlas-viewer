@@ -391,6 +391,35 @@ body {
   color: rgba(255,255,255,0.8);
 }
 
+.created-by-link {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255,255,255,0.45);
+  text-decoration: none;
+  font-size: 12px;
+  z-index: 50;
+  transition: color 0.2s;
+}
+
+.created-by-link:hover {
+  color: rgba(255,255,255,0.8);
+}
+
+.cn-logo {
+  height: 18px;
+  vertical-align: middle;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.created-by-link:hover .cn-logo {
+  opacity: 1;
+}
+
 /* Region panel (right sidebar) */
 .region-panel {
   flex: 1;

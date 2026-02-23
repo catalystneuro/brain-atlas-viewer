@@ -83,8 +83,13 @@ async function init() {
   hideLoading();
   animate();
 
-  // Restore view from URL hash, or listen for changes
-  applyHashState();
+  // Restore view from URL hash, or default to root selection
+  if (!location.hash.slice(1)) {
+    const rootNode = structureGraph[0];
+    if (rootNode) selectRegion(rootNode.id, { expandTree: true, pushState: false });
+  } else {
+    applyHashState();
+  }
   window.addEventListener('hashchange', () => applyHashState());
 
   // Fetch dandiset titles in background (non-blocking)
