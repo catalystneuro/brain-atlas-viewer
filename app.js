@@ -21,21 +21,24 @@ let ancestorStructureIds = new Set();
 let noMeshIds = new Set();
 let dandisetToStructures = {};  // dandiset_id -> [structure_ids]
 let dandisetTitles = {};        // dandiset_id -> title string
+let dandisetAssets = {};        // dandiset_id -> [{path, asset_id, regions}]
 let selectedDandiset = null;
 
 // ── Initialization ─────────────────────────────────────────────────────────
 async function init() {
   updateLoadingText('Fetching data...');
 
-  const [graphResp, regionsResp, manifestResp] = await Promise.all([
+  const [graphResp, regionsResp, manifestResp, assetsResp] = await Promise.all([
     fetch('data/structure_graph.json').then(r => r.json()),
     fetch('data/dandi_regions.json').then(r => r.json()),
     fetch('data/mesh_manifest.json').then(r => r.json()),
+    fetch('data/dandiset_assets.json').then(r => r.json()),
   ]);
 
   structureGraph = graphResp;
   dandiRegions = regionsResp;
   meshManifest = manifestResp;
+  dandisetAssets = assetsResp;
 
   dataStructureIds = new Set(meshManifest.data_structures);
   ancestorStructureIds = new Set(meshManifest.ancestor_structures);
@@ -558,8 +561,9 @@ function filterTreeByDandiset(dandisetId) {
 }
 
 function clearDandisetFilter() {
-  // Hide filter bar
+  // Hide filter bars
   document.getElementById('dandiset-filter-bar').classList.add('hidden');
+  hideSubjectFilter();
 
   // Remove dandiset filter classes from all tree nodes
   const container = document.getElementById('hierarchy-tree');
@@ -583,48 +587,214 @@ function clearDandisetFilter() {
     '<p class="placeholder-text">Click a brain region to view details and associated DANDI datasets.</p>';
 }
 
+function showSubjectFilter(subjectName) {
+  const bar = document.getElementById('subject-filter-bar');
+  const label = document.getElementById('subject-filter-label');
+  bar.classList.remove('hidden');
+  label.textContent = `Subject: ${subjectName}`;
+}
+
+function hideSubjectFilter() {
+  document.getElementById('subject-filter-bar').classList.add('hidden');
+}
+
 function updateDandisetPanel(dandisetId, structureIds) {
   const panel = document.getElementById('region-panel');
+  const assets = dandisetAssets[dandisetId] || [];
 
   const title = dandisetTitles[dandisetId] || '';
-  let html = `
-    <div class="region-header">
-      <div class="region-name">Dandiset ${dandisetId}</div>
-      <div class="dandiset-detail-title" id="dandiset-detail-title">${title}</div>
-      <a class="dandiset-external-link" href="https://dandiarchive.org/dandiset/${dandisetId}" target="_blank" rel="noopener">
-        View on DANDI Archive &#8599;
-      </a>
-    </div>
-    <div class="region-stats">
-      <div class="stat-item">
-        <div class="stat-value">${structureIds.length}</div>
-        <div class="stat-label">Brain Regions</div>
-      </div>
-    </div>
-    <div class="dandiset-list-header">Recorded Brain Regions</div>
-  `;
 
-  for (const sid of structureIds) {
-    const region = dandiRegions[String(sid)];
-    if (!region) continue;
-    const color = region.color_hex_triplet || 'aaaaaa';
-    html += `
-      <div class="region-card" data-structure-id="${sid}">
-        <span class="region-card-dot" style="background:#${color}"></span>
-        <span class="region-card-label">${region.acronym}</span>
-        <span class="region-card-name">${region.name}</span>
-      </div>`;
+  // Group assets by subject, merging regions across sessions
+  const subjectMap = new Map();
+  for (const asset of assets) {
+    const parts = asset.path.split('/');
+    const subjectDir = parts.length > 1 ? parts[0] : asset.path.split('_')[0];
+    const subjectId = subjectDir.replace(/^sub-/, '');
+
+    if (!subjectMap.has(subjectId)) {
+      subjectMap.set(subjectId, { regions: new Map(), sessionCount: 0, subjectDir });
+    }
+    const entry = subjectMap.get(subjectId);
+    entry.sessionCount++;
+    for (const r of asset.regions) {
+      if (!entry.regions.has(r.id)) {
+        entry.regions.set(r.id, r);
+      }
+    }
   }
 
-  panel.innerHTML = html;
+  const uniqueRegionIds = new Set();
+  for (const [, entry] of subjectMap) {
+    for (const rid of entry.regions.keys()) uniqueRegionIds.add(rid);
+  }
 
-  // Click on region cards to select that region
-  panel.querySelectorAll('.region-card').forEach(card => {
-    card.addEventListener('click', () => {
-      const sid = parseInt(card.dataset.structureId);
-      selectRegion(sid);
+  const allRegionIds = [...uniqueRegionIds];
+  const subjects = [...subjectMap.entries()];  // array for pagination
+  const PAGE_SIZE = 20;
+  let currentPage = 0;
+  const totalPages = Math.ceil(subjects.length / PAGE_SIZE);
+
+  function render(page) {
+    currentPage = page;
+    const start = page * PAGE_SIZE;
+    const end = Math.min(start + PAGE_SIZE, subjects.length);
+    const pageSubjects = subjects.slice(start, end);
+
+    let html = `
+      <div class="region-header">
+        <div class="region-name">Dandiset ${dandisetId}</div>
+        <div class="dandiset-detail-title" id="dandiset-detail-title">${title}</div>
+        <a class="dandiset-external-link" href="https://dandiarchive.org/dandiset/${dandisetId}" target="_blank" rel="noopener">
+          View on DANDI Archive &#8599;
+        </a>
+      </div>
+      <div class="region-stats">
+        <div class="stat-item">
+          <div class="stat-value">${subjectMap.size}</div>
+          <div class="stat-label">Subjects</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value">${uniqueRegionIds.size || structureIds.length}</div>
+          <div class="stat-label">Brain Regions</div>
+        </div>
+      </div>
+    `;
+
+    if (subjectMap.size === 0) {
+      html += '<p class="no-data-msg">No asset data available for this dandiset.</p>';
+    } else {
+      // "All Subjects" button above the header
+      html += `<div class="asset-card asset-card-selected" data-region-ids='${JSON.stringify(allRegionIds)}' data-all="true">`;
+      html += `<span class="asset-card-filename">All Subjects</span>`;
+      html += `<span class="asset-card-region-count">${uniqueRegionIds.size} regions</span>`;
+      html += `</div>`;
+
+      html += `<div class="dandiset-list-header">Subjects <span class="dandiset-list-hint">click to filter</span></div>`;
+
+      for (const [subjectId, entry] of pageSubjects) {
+        const regionIds = JSON.stringify([...entry.regions.keys()]);
+        const dandiFilesUrl = `https://dandiarchive.org/dandiset/${dandisetId}/draft/files?location=${encodeURIComponent(entry.subjectDir)}`;
+        const regionCount = entry.regions.size;
+
+        html += `<div class="asset-card" data-region-ids='${regionIds}'>`;
+        html += `<span class="asset-card-filename">${subjectId}</span>`;
+        html += `<span class="asset-card-region-count">${regionCount} region${regionCount !== 1 ? 's' : ''}</span>`;
+        html += `<a class="asset-card-ext" href="${dandiFilesUrl}" target="_blank" rel="noopener" title="View on DANDI Archive">&#8599;</a>`;
+        html += `</div>`;
+      }
+
+      // Pagination controls
+      if (totalPages > 1) {
+        html += `<div class="pagination">`;
+        html += `<button class="pagination-btn" data-page="${page - 1}" ${page === 0 ? 'disabled' : ''}>&laquo; Prev</button>`;
+        html += `<span class="pagination-info">${start + 1}&ndash;${end} of ${subjects.length}</span>`;
+        html += `<button class="pagination-btn" data-page="${page + 1}" ${page >= totalPages - 1 ? 'disabled' : ''}>Next &raquo;</button>`;
+        html += `</div>`;
+      }
+    }
+
+    panel.innerHTML = html;
+    attachCardListeners();
+  }
+
+  function attachCardListeners() {
+    // Click on subject cards
+    panel.querySelectorAll('.asset-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.asset-card-ext')) return;
+        const regionIds = JSON.parse(card.dataset.regionIds || '[]');
+
+        if (card.dataset.all) {
+          filterTreeByDandiset(dandisetId);
+          hideSubjectFilter();
+        } else {
+          const subjectName = card.querySelector('.asset-card-filename')?.textContent || '';
+          filterTreeByStructureIds(regionIds);
+          showSubjectFilter(subjectName);
+        }
+        isolateStructureIds(regionIds);
+
+        panel.querySelectorAll('.asset-card').forEach(c => c.classList.remove('asset-card-selected'));
+        card.classList.add('asset-card-selected');
+      });
     });
+
+    // Pagination buttons
+    panel.querySelectorAll('.pagination-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const page = parseInt(btn.dataset.page);
+        if (page >= 0 && page < totalPages) {
+          render(page);
+        }
+      });
+    });
+  }
+
+  render(0);
+}
+
+function filterTreeByStructureIds(structureIds) {
+  const activeIds = new Set(structureIds);
+
+  // Add all ancestors so tree paths remain visible
+  for (const sid of structureIds) {
+    let current = idToStructure[sid]?.parent_structure_id;
+    while (current != null) {
+      activeIds.add(current);
+      current = idToStructure[current]?.parent_structure_id;
+    }
+  }
+
+  // Expand tree paths to matching nodes
+  for (const sid of structureIds) {
+    expandToNode(sid);
+  }
+
+  // Apply active/inactive styling
+  const container = document.getElementById('hierarchy-tree');
+  container.querySelectorAll('.tree-node').forEach(node => {
+    const id = parseInt(node.dataset.id);
+    const label = node.querySelector(':scope > .tree-node-content .tree-label');
+    const dot = node.querySelector(':scope > .tree-node-content .tree-color-dot');
+    if (!activeIds.has(id)) {
+      if (label) { label.classList.add('dandiset-inactive'); label.classList.remove('dandiset-active'); }
+      if (dot) { dot.classList.add('dandiset-inactive'); dot.classList.remove('dandiset-active'); }
+    } else {
+      if (label) { label.classList.remove('dandiset-inactive'); label.classList.add('dandiset-active'); }
+      if (dot) { dot.classList.remove('dandiset-inactive'); dot.classList.add('dandiset-active'); }
+    }
   });
+}
+
+async function isolateStructureIds(structureIds) {
+  const activeSet = new Set(structureIds);
+
+  // Ensure meshes are loaded
+  const toLoad = [];
+  for (const sid of structureIds) {
+    if (!meshObjects[sid] && !failedMeshIds.has(sid) && !noMeshIds.has(sid)) {
+      toLoad.push(ensureMeshLoaded(sid));
+    }
+  }
+  if (toLoad.length > 0) await Promise.all(toLoad);
+
+  // For structures without meshes, show nearest ancestor
+  for (const sid of structureIds) {
+    if (!meshObjects[sid]) {
+      const fallback = findNearestAncestorWithMesh(sid);
+      if (fallback) activeSet.add(fallback);
+    }
+  }
+
+  activeSet.delete(meshManifest.root_id);
+  for (const [idStr, mesh] of Object.entries(meshObjects)) {
+    const id = parseInt(idStr);
+    if (activeSet.has(id)) {
+      applyActive(mesh);
+    } else {
+      applyDimmed(mesh);
+    }
+  }
 }
 
 function selectRegion(structureId, { expandTree = true, pushState = true } = {}) {
@@ -678,63 +848,50 @@ function updateRegionPanel(structureId) {
   const name = region ? region.name : s.name;
   const acronym = region ? region.acronym : s.acronym;
   const color = region ? region.color_hex_triplet : (s.color_hex_triplet || 'aaaaaa');
-
   const atlasUrl = `https://atlas.brain-map.org/atlas#atlas=2&structure=${structureId}`;
-  let html = `
-    <div class="region-header">
-      <div class="region-name">${name} <a class="region-ext-link" href="${atlasUrl}" target="_blank" rel="noopener" title="View on Allen Brain Atlas">&#8599;</a></div>
-      <div class="region-acronym">${acronym}</div>
-      <div class="region-color-bar" style="background: #${color}"></div>
-    </div>
-  `;
 
+  // Merge all dandisets (direct + sub-region) into one deduplicated list
+  let allDandisets = [];
   if (region) {
-    const hasDirect = region.dandiset_count > 0;
-    const hasDescendant = (region.total_dandiset_count || 0) > region.dandiset_count;
+    const seen = new Set();
+    for (const did of (region.dandisets || [])) { seen.add(did); allDandisets.push(did); }
+    for (const did of (region.total_dandisets || [])) { if (!seen.has(did)) { seen.add(did); allDandisets.push(did); } }
+  }
 
-    html += `<div class="region-stats">`;
-    if (hasDirect) {
-      html += `
+  const PAGE_SIZE = 20;
+  const totalPages = Math.ceil(allDandisets.length / PAGE_SIZE);
+  let currentPage = 0;
+
+  function render(page) {
+    currentPage = page;
+    const start = page * PAGE_SIZE;
+    const end = Math.min(start + PAGE_SIZE, allDandisets.length);
+    const pageDandisets = allDandisets.slice(start, end);
+
+    let html = `
+      <div class="region-header">
+        <div class="region-name">${name} <a class="region-ext-link" href="${atlasUrl}" target="_blank" rel="noopener" title="View on Allen Brain Atlas">&#8599;</a></div>
+        <div class="region-acronym">${acronym}</div>
+        <div class="region-color-bar" style="background: #${color}"></div>
+      </div>
+    `;
+
+    if (region) {
+      const totalCount = region.total_dandiset_count || region.dandiset_count || allDandisets.length;
+      html += `<div class="region-stats">
         <div class="stat-item">
-          <div class="stat-value">${region.dandiset_count}</div>
-          <div class="stat-label">Direct</div>
-        </div>`;
-    }
-    if (hasDescendant) {
-      html += `
-        <div class="stat-item">
-          <div class="stat-value">${region.total_dandiset_count}</div>
-          <div class="stat-label">Incl. Sub-regions</div>
-        </div>`;
-    }
-    html += `
+          <div class="stat-value">${totalCount}</div>
+          <div class="stat-label">Dandisets</div>
+        </div>
         <div class="stat-item">
           <div class="stat-value">${(region.total_file_count || region.file_count).toLocaleString()}</div>
           <div class="stat-label">NWB Files</div>
         </div>
       </div>`;
 
-    if (hasDirect) {
-      html += `<div class="dandiset-list-header">Direct Dandisets <span class="dandiset-list-hint">click to view in 3D</span></div>`;
-      for (const did of region.dandisets) {
-        const regionCount = (dandisetToStructures[did] || []).length;
-        html += `
-          <div class="dandiset-card" data-dandiset-id="${did}">
-            <div class="dandiset-card-top">
-              <span class="dandiset-card-id">${did}</span>
-              <span class="dandiset-card-count">${regionCount} region${regionCount !== 1 ? 's' : ''}</span>
-              <a class="dandiset-card-ext" href="https://dandiarchive.org/dandiset/${did}" target="_blank" rel="noopener" title="Open on DANDI Archive">&#8599;</a>
-            </div>
-            <div class="dandiset-card-title" data-dandiset-id="${did}">${dandisetTitles[did] || ''}</div>
-          </div>`;
-      }
-    }
-
-    if (hasDescendant) {
-      const descendantOnly = (region.total_dandisets || []).filter(d => !region.dandisets.includes(d));
-      if (descendantOnly.length > 0) {
-        html += `<div class="dandiset-list-header" style="margin-top:12px">Sub-region Dandisets <span class="dandiset-list-hint">click to view in 3D</span></div>`;
-        for (const did of descendantOnly) {
+      if (allDandisets.length > 0) {
+        html += `<div class="dandiset-list-header">Dandisets <span class="dandiset-list-hint">click to view in 3D</span></div>`;
+        for (const did of pageDandisets) {
           const regionCount = (dandisetToStructures[did] || []).length;
           html += `
             <div class="dandiset-card" data-dandiset-id="${did}">
@@ -746,21 +903,39 @@ function updateRegionPanel(structureId) {
               <div class="dandiset-card-title" data-dandiset-id="${did}">${dandisetTitles[did] || ''}</div>
             </div>`;
         }
+
+        if (totalPages > 1) {
+          html += `<div class="pagination">`;
+          html += `<button class="pagination-btn" data-page="${page - 1}" ${page === 0 ? 'disabled' : ''}>&laquo; Prev</button>`;
+          html += `<span class="pagination-info">${start + 1}&ndash;${end} of ${allDandisets.length}</span>`;
+          html += `<button class="pagination-btn" data-page="${page + 1}" ${page >= totalPages - 1 ? 'disabled' : ''}>Next &raquo;</button>`;
+          html += `</div>`;
+        }
       }
+    } else {
+      html += '<p class="no-data-msg">No DANDI datasets reference this region.</p>';
     }
-  } else {
-    html += '<p class="no-data-msg">No DANDI datasets reference this region.</p>';
+
+    panel.innerHTML = html;
+
+    // Click dandiset cards
+    panel.querySelectorAll('.dandiset-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.dandiset-card-ext')) return;
+        selectDandiset(card.dataset.dandisetId);
+      });
+    });
+
+    // Pagination buttons
+    panel.querySelectorAll('.pagination-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = parseInt(btn.dataset.page);
+        if (p >= 0 && p < totalPages) render(p);
+      });
+    });
   }
 
-  panel.innerHTML = html;
-
-  // Click dandiset cards to highlight all their brain regions
-  panel.querySelectorAll('.dandiset-card').forEach(card => {
-    card.addEventListener('click', (e) => {
-      if (e.target.closest('.dandiset-card-ext')) return;  // Let external link work normally
-      selectDandiset(card.dataset.dandisetId);
-    });
-  });
+  render(0);
 }
 
 // ── Hierarchy Tree (Left Sidebar) ──────────────────────────────────────────
@@ -1087,6 +1262,20 @@ setupResize();
 
 // ── Dandiset Filter Clear Button ────────────────────────────────────────────
 document.getElementById('dandiset-filter-clear').addEventListener('click', clearDandisetFilter);
+document.getElementById('subject-filter-clear').addEventListener('click', () => {
+  hideSubjectFilter();
+  // Restore to full dandiset view
+  if (selectedDandiset) {
+    filterTreeByDandiset(selectedDandiset);
+    const structureIds = dandisetToStructures[selectedDandiset] || [];
+    isolateStructureIds(structureIds);
+    // Deselect subject card, select "All Subjects"
+    const panel = document.getElementById('region-panel');
+    panel.querySelectorAll('.asset-card').forEach(c => c.classList.remove('asset-card-selected'));
+    const allCard = panel.querySelector('.asset-card[data-all]');
+    if (allCard) allCard.classList.add('asset-card-selected');
+  }
+});
 
 // ── URL Hash State ──────────────────────────────────────────────────────────
 function setHash(hash) {

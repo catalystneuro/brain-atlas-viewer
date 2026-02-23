@@ -654,6 +654,46 @@ body {
   color: var(--text-primary);
 }
 
+/* Subject filter bar (left sidebar, below dandiset bar) */
+.subject-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: rgba(233, 69, 96, 0.12);
+  border-bottom: 1px solid rgba(233, 69, 96, 0.25);
+  font-size: 12px;
+  color: var(--highlight);
+  font-weight: 600;
+}
+
+.subject-filter-bar.hidden {
+  display: none;
+}
+
+#subject-filter-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#subject-filter-clear {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+#subject-filter-clear:hover {
+  color: var(--text-primary);
+}
+
 /* Dandiset-inactive tree items */
 .tree-label.dandiset-inactive {
   color: var(--text-dim);
@@ -683,6 +723,104 @@ body {
 
 .region-ext-link:hover {
   color: var(--accent-hover);
+}
+
+/* Asset cards (in dandiset detail view) */
+.asset-card {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  background: rgba(83, 168, 182, 0.08);
+  border: 1px solid rgba(83, 168, 182, 0.15);
+  border-radius: 8px;
+  gap: 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.asset-card:hover {
+  background: rgba(83, 168, 182, 0.15);
+  border-color: rgba(83, 168, 182, 0.3);
+}
+
+.asset-card-filename {
+  flex: 1;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asset-card-session-count {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.asset-card-region-count {
+  color: var(--text-secondary);
+  font-size: 11px;
+  flex: 1;
+}
+
+.asset-card.asset-card-selected {
+  border-color: var(--accent);
+  background: rgba(83, 168, 182, 0.2);
+}
+
+.asset-card-ext {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.asset-card-ext:hover {
+  color: var(--accent-hover);
+  background: rgba(83, 168, 182, 0.2);
+  border-color: var(--accent);
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 0;
+  margin-top: 4px;
+}
+
+.pagination-btn {
+  background: rgba(83, 168, 182, 0.15);
+  border: 1px solid rgba(83, 168, 182, 0.3);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  background: rgba(83, 168, 182, 0.3);
+}
+
+.pagination-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.pagination-info {
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 /* No-data message for right panel */
