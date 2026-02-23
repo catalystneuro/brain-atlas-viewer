@@ -34,12 +34,13 @@ let hiddenRegionIds = new Set();  // regions toggled off by user in dandiset/sub
 async function init() {
   updateLoadingText('Fetching data...');
 
-  const [graphResp, regionsResp, manifestResp, assetsResp, electrodesResp] = await Promise.all([
+  const [graphResp, regionsResp, manifestResp, assetsResp, electrodesResp, lastUpdatedResp] = await Promise.all([
     fetch('data/structure_graph.json').then(r => r.json()),
     fetch('data/dandi_regions.json').then(r => r.json()),
     fetch('data/mesh_manifest.json').then(r => r.json()),
     fetch('data/dandiset_assets.json').then(r => r.json()),
     fetch('data/dandiset_electrodes.json').then(r => r.json()).catch(() => ({})),
+    fetch('data/last_updated.json').then(r => r.json()).catch(() => null),
   ]);
 
   structureGraph = graphResp;
@@ -47,6 +48,14 @@ async function init() {
   meshManifest = manifestResp;
   dandisetAssets = assetsResp;
   dandisetElectrodes = electrodesResp;
+
+  // Show last-updated timestamp
+  if (lastUpdatedResp && lastUpdatedResp.timestamp) {
+    const date = new Date(lastUpdatedResp.timestamp);
+    const formatted = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const el = document.getElementById('last-updated');
+    if (el) el.textContent = `Data updated ${formatted}`;
+  }
 
   dataStructureIds = new Set(meshManifest.data_structures);
   ancestorStructureIds = new Set(meshManifest.ancestor_structures);

@@ -8,3 +8,7 @@ __pycache__/
 # IDE
 .idea/
 .vscode/
+
+# Data update caches
+scripts/label_cache.jsonl
+scripts/electrode_cache.jsonl
