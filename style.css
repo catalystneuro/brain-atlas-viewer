@@ -323,6 +323,23 @@ body {
   font-size: 14px;
 }
 
+/* CCF attribution */
+.ccf-attribution {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.35);
+  text-decoration: none;
+  font-size: 12px;
+  z-index: 50;
+  transition: color 0.2s;
+}
+
+.ccf-attribution:hover {
+  color: rgba(255,255,255,0.8);
+}
+
 /* Orientation buttons */
 .orient-buttons {
   position: absolute;
