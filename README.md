@@ -2,6 +2,14 @@
 
 Interactive 3D viewer of the Allen Common Coordinate Framework (CCF) mouse brain atlas, highlighting regions that have associated datasets on the [DANDI Archive](https://dandiarchive.org).
 
+Read the [blog post](https://about.dandiarchive.org/blog/2026/02/24/introducing-dandi-atlas-explorer-explore-the-dandi-archive-in-3d/) for more details.
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=D8514CLVXYo">
+    <img src="https://img.youtube.com/vi/D8514CLVXYo/maxresdefault.jpg" alt="DANDI Atlas Explorer Demo" width="500">
+  </a>
+</p>
+
 ## Features
 
 - **3D brain visualization** using Three.js with Allen CCF mesh data

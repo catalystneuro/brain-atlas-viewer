@@ -1,7 +1,7 @@
 {
-  "timestamp": "2026-02-26T09:05:42Z",
-  "mode": "full",
-  "dandisets_checked": 790,
-  "dandisets_updated": 221,
-  "assets_processed": 10660
+  "timestamp": "2026-02-27T03:50:54Z",
+  "mode": "incremental",
+  "dandisets_checked": 0,
+  "dandisets_updated": 0,
+  "assets_processed": 0
 }
