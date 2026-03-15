@@ -505,6 +505,11 @@ def build_structure_graph(entries, root_name="D99 Atlas"):
         d99_abbrev = entry.get("d99_abbreviation")
         if d99_abbrev and d99_abbrev != entry["abbreviation"]:
             abbrev_to_id[d99_abbrev] = label_id
+        # Add string label ID as alias (e.g., "303" -> 303) so that
+        # brain_region_id values stored as string IDs (MEBRAINS) resolve correctly.
+        str_id = str(label_id)
+        if str_id not in abbrev_to_id:
+            abbrev_to_id[str_id] = label_id
 
     # Build tree by nesting children
     for node_id, node in id_to_structure.items():
