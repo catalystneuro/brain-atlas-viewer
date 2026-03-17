@@ -427,12 +427,11 @@ function loadMesh(structureId) {
             side: THREE.DoubleSide,
           });
         } else {
-          // No data at all — wireframe context
+          // No data — low-opacity solid for anatomical context
           material = new THREE.MeshPhongMaterial({
             color,
             transparent: true,
-            opacity: 0.05,
-            wireframe: true,
+            opacity: 0.15,
             side: THREE.DoubleSide,
             depthWrite: false,
           });
@@ -478,13 +477,23 @@ async function loadInitialMeshes() {
   // Load root brain outline first
   await loadMesh(meshManifest.root_id);
 
-  // Load top-level structures (depth-1 children)
-  const topLevel = structureGraph.flatMap(root =>
-    (root.children || []).map(c => c.id)
-  );
+  // Discover all available mesh files, then load them all for anatomical context
+  const meshDir = `${activeAtlas.dataPrefix}meshes/`;
+  let allMeshIds;
+  try {
+    const resp = await fetch(meshDir);
+    const html = await resp.text();
+    // Parse directory listing for .glb files
+    const matches = html.matchAll(/href="(\d+)\.glb"/g);
+    allMeshIds = [...matches].map(m => parseInt(m[1]));
+  } catch {
+    // Fallback to data_structures only if directory listing fails
+    allMeshIds = [...meshManifest.data_structures];
+  }
 
-  // Load data structures in batches (skip those without meshes)
-  const allToLoad = meshManifest.data_structures.filter(id => !noMeshIds.has(id));
+  const allToLoad = allMeshIds.filter(id =>
+    id !== meshManifest.root_id && !noMeshIds.has(id)
+  );
   const batchSize = 20;
   for (let i = 0; i < allToLoad.length; i += batchSize) {
     const batch = allToLoad.slice(i, i + batchSize);
