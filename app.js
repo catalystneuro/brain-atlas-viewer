@@ -496,13 +496,23 @@ async function loadInitialMeshes() {
   if (meshObjects[meshManifest.root_id]) {
     const box = new THREE.Box3().setFromObject(meshObjects[meshManifest.root_id]);
     brainCenter = box.getCenter(new THREE.Vector3());
-    controls.target.copy(brainCenter);
     const off = activeAtlas.camOffset;
     camera.position.set(
       brainCenter.x + off[0] * activeAtlas.camDist,
       brainCenter.y + off[1] * activeAtlas.camDist,
       brainCenter.z + off[2] * activeAtlas.camDist
     );
+    camera.up.set(...activeAtlas.cameraUp);
+
+    // Recreate OrbitControls so its internal quaternion matches the current up vector
+    const canvas = renderer.domElement;
+    controls.dispose();
+    controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.rotateSpeed = 0.8;
+    controls.zoomSpeed = 1.2;
+    controls.target.copy(brainCenter);
     controls.update();
   }
 }
