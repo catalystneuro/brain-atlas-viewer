@@ -1055,9 +1055,10 @@ async function updateDandisetPanel(dandisetId, structureIds) {
   }
 
   const allRegionIds = [...uniqueRegionIds];
+  // Natural sort: Intl.Collator with numeric: true sorts "2" before "10".
+  // JS has no natsort equivalent, so this is the idiomatic zero-dependency approach.
   const natCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
   const allSubjects = [...subjectMap.entries()].sort((a, b) => natCollator.compare(a[0], b[0]));
-  // Sort sessions within each subject
   for (const [, entry] of allSubjects) {
     entry.assets.sort((a, b) => natCollator.compare(a.session || a.path, b.session || b.path));
   }
