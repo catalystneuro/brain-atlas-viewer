@@ -778,7 +778,6 @@ def extract_atlas_coords(url, asset_id, hdf5_path):
         "raw_coords": raw_coords,
         "brain_region": brain_region,
         "brain_region_id": brain_region_id,
-        "source_unit": source_unit,
     }
 
 
