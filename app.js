@@ -524,32 +524,27 @@ async function loadInitialMeshes() {
     const box = new THREE.Box3().setFromObject(meshObjects[meshManifest.root_id]);
     brainCenter = box.getCenter(new THREE.Vector3());
 
-    if (activeAtlas.coordSystem === 'allen') {
-      // CCF: original camera setup (no OrbitControls recreation needed)
-      controls.target.copy(brainCenter);
-      camera.position.set(brainCenter.x, brainCenter.y, brainCenter.z + activeAtlas.camDist);
-      controls.update();
-    } else {
-      // Macaque: position along camOffset axis and recreate OrbitControls
-      // to avoid gimbal lock from the degenerate initial position
-      const off = activeAtlas.camOffset;
-      camera.position.set(
-        brainCenter.x + off[0] * activeAtlas.camDist,
-        brainCenter.y + off[1] * activeAtlas.camDist,
-        brainCenter.z + off[2] * activeAtlas.camDist
-      );
-      camera.up.set(...activeAtlas.cameraUp);
+    // Position camera along the atlas's offset axis
+    const off = activeAtlas.camOffset;
+    camera.position.set(
+      brainCenter.x + off[0] * activeAtlas.camDist,
+      brainCenter.y + off[1] * activeAtlas.camDist,
+      brainCenter.z + off[2] * activeAtlas.camDist
+    );
+    camera.up.set(...activeAtlas.cameraUp);
 
-      const canvas = renderer.domElement;
-      controls.dispose();
-      controls = new OrbitControls(camera, canvas);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.1;
-      controls.rotateSpeed = 0.8;
-      controls.zoomSpeed = 1.2;
-      controls.target.copy(brainCenter);
-      controls.update();
-    }
+    // Always recreate OrbitControls so it caches a fresh quaternion
+    // from the current up vector. Without this, switching atlases
+    // leaves the old atlas's quaternion baked into the controls.
+    const canvas = renderer.domElement;
+    controls.dispose();
+    controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.rotateSpeed = 0.8;
+    controls.zoomSpeed = 1.2;
+    controls.target.copy(brainCenter);
+    controls.update();
   }
 }
 
