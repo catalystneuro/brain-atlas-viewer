@@ -84,6 +84,14 @@ ATLAS_CONFIGS = {
     },
 }
 
+UNIT_ALIASES = {
+    "meters": "m", "m": "m",
+    "millimeters": "mm", "mm": "mm",
+    "micrometers": "um", "um": "um", "\u00b5m": "um",
+}
+
+UNIT_TO_MM = {"m": 1000.0, "mm": 1.0, "um": 0.001}
+
 DANDISET_ID = "001636"
 ROOT_ID = 9999
 OUTSIDE_ID = 9998
@@ -723,13 +731,39 @@ def extract_atlas_coords(url, asset_id, hdf5_path):
         y = t["y"][()]
         z = t["z"][()]
 
+        # Read unit attributes from HDF5 columns
+        raw_units = []
+        for col in ("x", "y", "z"):
+            u = t[col].attrs.get("unit", None)
+            if isinstance(u, bytes):
+                u = u.decode("utf-8")
+            raw_units.append(u)
+
+        if raw_units[0] is not None and len(set(raw_units)) == 1:
+            source_unit_raw = raw_units[0]
+        else:
+            source_unit_raw = None
+
         brain_region = _read_hdf5_strings(t, "brain_region")
         brain_region_id = _read_hdf5_strings(t, "brain_region_id")
+
+    # Resolve unit alias and compute conversion factor
+    source_unit = None
+    scale = 1.0
+    if source_unit_raw is not None:
+        canonical = UNIT_ALIASES.get(source_unit_raw)
+        if canonical is not None:
+            source_unit = source_unit_raw
+            scale = UNIT_TO_MM[canonical]
+            if canonical != "mm":
+                print(f"  [{asset_id}] Converting coordinates from {source_unit_raw} to mm (factor={scale})")
+        else:
+            print(f"  [{asset_id}] Unknown unit '{source_unit_raw}', assuming mm")
 
     coords = []
     raw_coords = []
     for xi, yi, zi in zip(x, y, z):
-        xi, yi, zi = float(xi), float(yi), float(zi)
+        xi, yi, zi = float(xi) * scale, float(yi) * scale, float(zi) * scale
         if xi != xi or yi != yi or zi != zi:
             continue
         raw_coords.append([round(xi, 3), round(yi, 3), round(zi, 3)])
@@ -744,6 +778,7 @@ def extract_atlas_coords(url, asset_id, hdf5_path):
         "raw_coords": raw_coords,
         "brain_region": brain_region,
         "brain_region_id": brain_region_id,
+        "source_unit": source_unit,
     }
 
 
