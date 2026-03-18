@@ -694,8 +694,8 @@ function restoreOriginal(mesh) {
 function applyActive(mesh) {
   const orig = mesh.userData.originalMaterial;
   const mat = orig.clone();
-  if (mesh.userData.isRoot) {
-    // Root mesh keeps its configured low opacity even when "active"
+  if (mesh.userData.isRoot && activeAtlas.coordSystem !== 'allen') {
+    // Macaque: root mesh keeps its configured low opacity even when "active"
     mat.opacity = orig.opacity * regionAlpha;
     mat.transparent = true;
     mat.depthWrite = false;
