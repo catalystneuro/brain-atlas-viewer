@@ -25,6 +25,7 @@ const ATLAS_CONFIGS = {
     nearPlane: 1,
     farPlane: 100000,
     electrodeSize: 150,
+    rootOpacity: 0.06,
     coordSystem: 'allen',
     attribution: 'Atlas: Allen Institute CCF',
     attributionUrl: 'https://atlas.brain-map.org/',
@@ -39,6 +40,7 @@ const ATLAS_CONFIGS = {
     nearPlane: 0.1,
     farPlane: 1000,
     electrodeSize: 3,
+    rootOpacity: 0.06,
     coordSystem: 'ras',
     attribution: 'Atlas: D99 v2 (Saleem & Logothetis)',
     attributionUrl: 'https://afni.nimh.nih.gov/pub/dist/doc/htmldoc/nonhuman/macaque_tempatl/atlas_d99v2.html',
@@ -53,6 +55,7 @@ const ATLAS_CONFIGS = {
     nearPlane: 0.1,
     farPlane: 1000,
     electrodeSize: 3,
+    rootOpacity: 0.06,
     coordSystem: 'ras',
     attribution: 'Atlas: NMT v2 (Jung et al. 2021)',
     attributionUrl: 'https://afni.nimh.nih.gov/pub/dist/doc/htmldoc/nonhuman/macaque_tempatl/template_nmtv2.html',
@@ -67,6 +70,7 @@ const ATLAS_CONFIGS = {
     nearPlane: 0.1,
     farPlane: 1000,
     electrodeSize: 3,
+    rootOpacity: 0.015,
     coordSystem: 'ras',
     attribution: 'Atlas: MEBRAINS (EBRAINS)',
     attributionUrl: 'https://ebrains.eu/tools/mebrains',
@@ -412,7 +416,7 @@ function loadMesh(structureId) {
           material = new THREE.MeshPhongMaterial({
             color: 0xcccccc,
             transparent: true,
-            opacity: 0.06,
+            opacity: activeAtlas.rootOpacity,
             side: THREE.DoubleSide,
             depthWrite: false,
           });
@@ -665,7 +669,7 @@ function applyDimmed(mesh) {
     if (orig) {
       const mat = orig.clone();
       mat.color.set(0x888888);
-      mat.opacity = 0.08 * regionAlpha;
+      mat.opacity = Math.min(orig.opacity, 0.08) * regionAlpha;
       mat.transparent = true;
       mat.depthWrite = false;
       mat.needsUpdate = true;
@@ -690,9 +694,16 @@ function restoreOriginal(mesh) {
 function applyActive(mesh) {
   const orig = mesh.userData.originalMaterial;
   const mat = orig.clone();
-  mat.opacity = regionAlpha;
-  mat.transparent = regionAlpha < 1;
-  mat.depthWrite = regionAlpha >= 1;
+  if (mesh.userData.isRoot) {
+    // Root mesh keeps its configured low opacity even when "active"
+    mat.opacity = orig.opacity * regionAlpha;
+    mat.transparent = true;
+    mat.depthWrite = false;
+  } else {
+    mat.opacity = regionAlpha;
+    mat.transparent = regionAlpha < 1;
+    mat.depthWrite = regionAlpha >= 1;
+  }
   mat.needsUpdate = true;
   mesh.material = mat;
   mesh.visible = true;

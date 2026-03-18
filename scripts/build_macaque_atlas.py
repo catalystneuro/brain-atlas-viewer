@@ -75,6 +75,7 @@ ATLAS_CONFIGS = {
     },
     "mebrains": {
         "nifti": TURNER_DATA / "mebrains/MEBRAINS_parcellation.nii.gz",
+        "template_nifti": TURNER_DATA / "mebrains/MEBRAINS_T1.nii.gz",
         "labels_type": "mebrains",
         "hdf5_path": "general/localization/MEBRAINSAtlasCoordinates",
         "output_dir": PROJECT_ROOT / "data/atlases/mebrains",
@@ -525,8 +526,13 @@ def build_structure_graph(entries, root_name="D99 Atlas"):
 # ---------------------------------------------------------------------------
 
 
-def generate_meshes(nifti_file, meshes_dir, id_to_structure):
+def generate_meshes(nifti_file, meshes_dir, id_to_structure, template_nifti=None):
     """Generate GLB meshes from a NIfTI atlas volume.
+
+    If template_nifti is provided, the root mesh is generated from the
+    template (thresholded MRI) instead of the parcellation. This produces a
+    complete brain outline even when the parcellation only covers part of the
+    volume (e.g. MEBRAINS cortical-only parcellation).
 
     Returns list of label IDs that have no mesh.
     """
@@ -548,14 +554,26 @@ def generate_meshes(nifti_file, meshes_dir, id_to_structure):
     skipped_existing = 0
     skipped_small = 0
 
-    # Root mesh (union of all non-zero)
+    # Root mesh (whole brain outline)
     root_glb = meshes_dir / f"{ROOT_ID}.glb"
     if not root_glb.exists():
-        print("Generating root mesh (whole brain)...")
-        root_mask = atlas_data > 0
+        if template_nifti:
+            # Use T1 template for a complete brain surface
+            print(f"Generating root mesh from template: {template_nifti.name}")
+            t1_img = nib.load(str(template_nifti))
+            t1_data = np.asarray(t1_img.dataobj, dtype=np.float32)
+            t1_affine = t1_img.affine
+            root_mask = t1_data > 50  # threshold to get brain mask
+            root_affine = t1_affine
+        else:
+            # Use parcellation (union of all labeled voxels)
+            print("Generating root mesh (whole brain)...")
+            root_mask = atlas_data > 0
+            root_affine = affine
+
         verts, faces, _, _ = marching_cubes(root_mask, level=0.5)
         verts_homogeneous = np.column_stack([verts, np.ones(len(verts))])
-        verts_world = (affine @ verts_homogeneous.T).T[:, :3]
+        verts_world = (root_affine @ verts_homogeneous.T).T[:, :3]
         verts_world[:, 0] *= -1
         faces = faces[:, ::-1]
         mesh = trimesh.Trimesh(vertices=verts_world, faces=faces)
@@ -994,7 +1012,10 @@ def main():
                 no_mesh.append(nid)
     else:
         print("Generating meshes from NIfTI volume...")
-        no_mesh = generate_meshes(config["nifti"], meshes_dir, id_to_structure)
+        no_mesh = generate_meshes(
+            config["nifti"], meshes_dir, id_to_structure,
+            template_nifti=config.get("template_nifti"),
+        )
 
     # DANDI data
     if args.skip_dandi:
