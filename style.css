@@ -1028,6 +1028,10 @@ body {
   accent-color: var(--accent);
 }
 
+#background-alpha {
+  accent-color: #888888;
+}
+
 #electrode-alpha {
   accent-color: #ff4466;
 }

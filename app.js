@@ -106,6 +106,7 @@ let selectedDandiset = null;
 let dandisetElectrodes = {};  // cache: dandiset_id -> {asset_id: [[x,y,z], ...]}
 let electrodePoints = null;   // THREE.Points object
 let regionAlpha = 1;          // global opacity multiplier for brain meshes
+let backgroundAlpha = 0;         // opacity for dimmed background meshes (0 = hidden, updated when slider shown)
 let dandisetRegionFilter = null; // structure_id when filtering subjects by region within a dandiset
 let dandisetSubjectCounts = null; // { directSubjects, totalSubjects } when a dandiset is selected
 let hiddenRegionIds = new Set();  // regions toggled off by user in dandiset/subject view
@@ -121,6 +122,8 @@ async function loadAtlas(atlasKey) {
 
   // Clear existing state
   clearElectrodePoints();
+  document.getElementById('background-control-row').classList.add('hidden');
+  backgroundAlpha = 0;
   selectedId = null;
   hoveredId = null;
   selectedDandiset = null;
@@ -189,9 +192,16 @@ async function loadAtlas(atlasKey) {
 
   hideLoading();
 
-  // Select root
+  // Show only root mesh at init (no isolation, no context slider)
   const rootNode = structureGraph[0];
-  if (rootNode) selectRegion(rootNode.id, { expandTree: true, pushState: false });
+  if (rootNode) {
+    showRootOnly();
+    selectedId = rootNode.id;
+    expandToNode(rootNode.id);
+    const el = document.querySelector(`.tree-node-content[data-id="${rootNode.id}"]`);
+    if (el) el.classList.add('selected');
+    updateRegionPanel(rootNode.id);
+  }
 
   // Fetch dandiset titles in background
   fetchDandisetTitles();
@@ -271,8 +281,16 @@ async function init() {
 
   // Restore view from URL hash, or default to root selection
   if (!location.hash.slice(1)) {
+    // Show only root mesh at init (no isolation, no context slider)
     const rootNode = structureGraph[0];
-    if (rootNode) selectRegion(rootNode.id, { expandTree: true, pushState: false });
+    if (rootNode) {
+      showRootOnly();
+      selectedId = rootNode.id;
+      expandToNode(rootNode.id);
+      const el = document.querySelector(`.tree-node-content[data-id="${rootNode.id}"]`);
+      if (el) el.classList.add('selected');
+      updateRegionPanel(rootNode.id);
+    }
   } else {
     applyHashState();
   }
@@ -656,25 +674,22 @@ function getDescendantIds(structureId) {
 }
 
 function applyDimmed(mesh) {
-  if (activeAtlas.coordSystem === 'allen') {
-    // CCF: hide completely (original behavior)
+  if (backgroundAlpha === 0) {
     mesh.visible = false;
-    mesh.userData.isDimmed = true;
   } else {
-    // Macaque: neutral gray ghost for anatomical context
     const orig = mesh.userData.originalMaterial;
     if (orig) {
       const mat = orig.clone();
       mat.color.set(0x888888);
-      mat.opacity = Math.min(orig.opacity, 0.08) * regionAlpha;
+      mat.opacity = backgroundAlpha;
       mat.transparent = true;
       mat.depthWrite = false;
       mat.needsUpdate = true;
       mesh.material = mat;
     }
     mesh.visible = true;
-    mesh.userData.isDimmed = true;
   }
+  mesh.userData.isDimmed = true;
 }
 
 function restoreOriginal(mesh) {
@@ -691,16 +706,9 @@ function restoreOriginal(mesh) {
 function applyActive(mesh) {
   const orig = mesh.userData.originalMaterial;
   const mat = orig.clone();
-  if (mesh.userData.isRoot && activeAtlas.coordSystem !== 'allen') {
-    // Macaque: root mesh keeps its configured low opacity even when "active"
-    mat.opacity = orig.opacity * regionAlpha;
-    mat.transparent = true;
-    mat.depthWrite = false;
-  } else {
-    mat.opacity = regionAlpha;
-    mat.transparent = regionAlpha < 1;
-    mat.depthWrite = regionAlpha >= 1;
-  }
+  mat.opacity = regionAlpha;
+  mat.transparent = regionAlpha < 1;
+  mat.depthWrite = regionAlpha >= 1;
   mat.needsUpdate = true;
   mesh.material = mat;
   mesh.visible = true;
@@ -753,10 +761,40 @@ function applyIsolation(selectedStructureId, activeIds, fallbackId) {
   }
 }
 
-function showAllRegions() {
+function showBackgroundSlider() {
+  const row = document.getElementById('background-control-row');
+  row.classList.remove('hidden');
+  backgroundAlpha = parseFloat(document.getElementById('background-alpha').value);
   for (const mesh of Object.values(meshObjects)) {
-    restoreOriginal(mesh);
+    if (mesh.userData.isDimmed) applyDimmed(mesh);
   }
+}
+
+function showRootOnly() {
+  document.getElementById('background-control-row').classList.add('hidden');
+  backgroundAlpha = 0;
+  for (const [idStr, mesh] of Object.entries(meshObjects)) {
+    const id = parseInt(idStr);
+    if (id === meshManifest.root_id) {
+      // Root at full regionAlpha (rootOpacity is for shell mode, not init view)
+      const orig = mesh.userData.originalMaterial;
+      const mat = orig.clone();
+      mat.opacity = regionAlpha;
+      mat.transparent = regionAlpha < 1;
+      mat.depthWrite = regionAlpha >= 1;
+      mat.needsUpdate = true;
+      mesh.material = mat;
+      mesh.visible = true;
+      mesh.userData.isDimmed = false;
+    } else {
+      mesh.visible = false;
+      mesh.userData.isDimmed = false;
+    }
+  }
+}
+
+function showAllRegions() {
+  showRootOnly();
 }
 
 function computeDandisetSubjectCounts(dandisetId) {
@@ -869,8 +907,9 @@ async function selectDandiset(dandisetId, { pushState = true } = {}) {
     }
   }
 
+  // Root is always context (dimmed) when a dandiset is selected
+  activeSet.delete(meshManifest.root_id);
   // Apply isolation: show active regions, dim/hide everything else
-  if (activeAtlas.coordSystem === 'allen') activeSet.delete(meshManifest.root_id);
   for (const [idStr, mesh] of Object.entries(meshObjects)) {
     const id = parseInt(idStr);
     if (activeSet.has(id)) {
@@ -885,6 +924,8 @@ async function selectDandiset(dandisetId, { pushState = true } = {}) {
       applyDimmed(mesh);
     }
   }
+
+  showBackgroundSlider();
 
   // Update right panel to show dandiset info
   updateDandisetPanel(dandisetId, structureIds);
@@ -1476,7 +1517,8 @@ async function isolateStructureIds(structureIds) {
     }
   }
 
-  if (activeAtlas.coordSystem === 'allen') activeSet.delete(meshManifest.root_id);
+  // Root is always context (dimmed) when structures are isolated
+  activeSet.delete(meshManifest.root_id);
   for (const [idStr, mesh] of Object.entries(meshObjects)) {
     const id = parseInt(idStr);
     if (activeSet.has(id)) {
@@ -1655,6 +1697,7 @@ function selectRegion(structureId, { expandTree = true, pushState = true } = {})
 
   // Isolate this region in the 3D view, then highlight
   isolateRegion(structureId);
+  showBackgroundSlider();
   highlightMesh(structureId);
 
   // Update tree selection
@@ -2135,6 +2178,23 @@ document.getElementById('electrode-alpha').addEventListener('input', (e) => {
   }
 });
 
+document.getElementById('background-alpha').addEventListener('input', (e) => {
+  backgroundAlpha = parseFloat(e.target.value);
+  for (const mesh of Object.values(meshObjects)) {
+    if (!mesh.userData.isDimmed) continue;
+    if (backgroundAlpha === 0) {
+      mesh.visible = false;
+    } else {
+      mesh.visible = true;
+      mesh.material.color.set(0x888888);
+      mesh.material.opacity = backgroundAlpha;
+      mesh.material.transparent = true;
+      mesh.material.depthWrite = false;
+      mesh.material.needsUpdate = true;
+    }
+  }
+});
+
 document.getElementById('region-alpha').addEventListener('input', (e) => {
   regionAlpha = parseFloat(e.target.value);
   for (const mesh of Object.values(meshObjects)) {
@@ -2196,6 +2256,8 @@ async function applyHashState() {
       dandisetSubjectCounts = null;
       hiddenRegionIds = new Set();
       document.getElementById('region-toggles-overlay').classList.add('hidden');
+      document.getElementById('background-control-row').classList.add('hidden');
+      backgroundAlpha = 0;
       clearElectrodePoints();
       const prevEl = document.querySelector('.tree-node-content.selected');
       if (prevEl) prevEl.classList.remove('selected');
