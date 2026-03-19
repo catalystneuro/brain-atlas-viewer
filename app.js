@@ -106,7 +106,7 @@ let selectedDandiset = null;
 let dandisetElectrodes = {};  // cache: dandiset_id -> {asset_id: [[x,y,z], ...]}
 let electrodePoints = null;   // THREE.Points object
 let regionAlpha = 1;          // global opacity multiplier for brain meshes
-let backgroundAlpha = 0;         // opacity for dimmed background meshes (0 = hidden, updated when slider shown)
+let outlineAlpha = 0;         // opacity for atlas outline mesh (0 = hidden, updated when slider shown)
 let dandisetRegionFilter = null; // structure_id when filtering subjects by region within a dandiset
 let dandisetSubjectCounts = null; // { directSubjects, totalSubjects } when a dandiset is selected
 let hiddenRegionIds = new Set();  // regions toggled off by user in dandiset/subject view
@@ -122,8 +122,8 @@ async function loadAtlas(atlasKey) {
 
   // Clear existing state
   clearElectrodePoints();
-  document.getElementById('background-control-row').classList.add('hidden');
-  backgroundAlpha = 0;
+  document.getElementById('outline-control-row').classList.add('hidden');
+  outlineAlpha = 0;
   selectedId = null;
   hoveredId = null;
   selectedDandiset = null;
@@ -674,14 +674,14 @@ function getDescendantIds(structureId) {
 }
 
 function applyDimmed(mesh) {
-  if (!mesh.userData.isRoot || backgroundAlpha === 0) {
+  if (!mesh.userData.isRoot || outlineAlpha === 0) {
     mesh.visible = false;
   } else {
     const orig = mesh.userData.originalMaterial;
     if (orig) {
       const mat = orig.clone();
       mat.color.set(0x888888);
-      mat.opacity = backgroundAlpha;
+      mat.opacity = outlineAlpha;
       mat.transparent = true;
       mat.depthWrite = false;
       mat.depthTest = false;
@@ -764,18 +764,18 @@ function applyIsolation(selectedStructureId, activeIds, fallbackId) {
   }
 }
 
-function showBackgroundSlider() {
-  const row = document.getElementById('background-control-row');
+function showOutlineSlider() {
+  const row = document.getElementById('outline-control-row');
   row.classList.remove('hidden');
-  backgroundAlpha = parseFloat(document.getElementById('background-alpha').value);
+  outlineAlpha = parseFloat(document.getElementById('outline-alpha').value);
   for (const mesh of Object.values(meshObjects)) {
     if (mesh.userData.isDimmed) applyDimmed(mesh);
   }
 }
 
 function showRootOnly() {
-  document.getElementById('background-control-row').classList.add('hidden');
-  backgroundAlpha = 0;
+  document.getElementById('outline-control-row').classList.add('hidden');
+  outlineAlpha = 0;
   for (const [idStr, mesh] of Object.entries(meshObjects)) {
     const id = parseInt(idStr);
     if (id === meshManifest.root_id) {
@@ -930,7 +930,7 @@ async function selectDandiset(dandisetId, { pushState = true } = {}) {
     }
   }
 
-  showBackgroundSlider();
+  showOutlineSlider();
 
   // Update right panel to show dandiset info
   updateDandisetPanel(dandisetId, structureIds);
@@ -1702,7 +1702,7 @@ function selectRegion(structureId, { expandTree = true, pushState = true } = {})
 
   // Isolate this region in the 3D view, then highlight
   isolateRegion(structureId);
-  showBackgroundSlider();
+  showOutlineSlider();
   highlightMesh(structureId);
 
   // Update tree selection
@@ -2183,16 +2183,16 @@ document.getElementById('electrode-alpha').addEventListener('input', (e) => {
   }
 });
 
-document.getElementById('background-alpha').addEventListener('input', (e) => {
-  backgroundAlpha = parseFloat(e.target.value);
+document.getElementById('outline-alpha').addEventListener('input', (e) => {
+  outlineAlpha = parseFloat(e.target.value);
   for (const mesh of Object.values(meshObjects)) {
     if (!mesh.userData.isDimmed) continue;
-    if (backgroundAlpha === 0) {
+    if (outlineAlpha === 0) {
       mesh.visible = false;
     } else {
       mesh.visible = true;
       mesh.material.color.set(0x888888);
-      mesh.material.opacity = backgroundAlpha;
+      mesh.material.opacity = outlineAlpha;
       mesh.material.transparent = true;
       mesh.material.depthWrite = false;
       mesh.material.needsUpdate = true;
@@ -2261,8 +2261,8 @@ async function applyHashState() {
       dandisetSubjectCounts = null;
       hiddenRegionIds = new Set();
       document.getElementById('region-toggles-overlay').classList.add('hidden');
-      document.getElementById('background-control-row').classList.add('hidden');
-      backgroundAlpha = 0;
+      document.getElementById('outline-control-row').classList.add('hidden');
+      outlineAlpha = 0;
       clearElectrodePoints();
       const prevEl = document.querySelector('.tree-node-content.selected');
       if (prevEl) prevEl.classList.remove('selected');
