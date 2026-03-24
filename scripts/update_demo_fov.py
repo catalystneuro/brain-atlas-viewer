@@ -1,12 +1,12 @@
 """
 Update data/electrodes/DEMO-FOV.json from an NWB file.
 
-Reads per-pixel CCF coordinates from AnatomicalCoordinatesImageCCFv3,
+Reads per-pixel CCF coordinates from AnatomicalCoordinatesCCFv3MappedOnSourceImage,
 colors pixels by brain region using Allen CCF colors, and writes landmarks
 from AnatomicalCoordinatesCCFv3.
 
 Usage:
-    python scripts/update_demo_fov.py E:\IBL-data-share\sub-CSK-im-009_ses-2864dca1-38d8-464c-9777-f6fdfd5e63b5_desc-processed_ophys+behavior.nwb [--step N]
+    python scripts/update_demo_fov.py <path_to_nwb_file> [--step N]
 """
 
 import argparse
@@ -54,7 +54,7 @@ def main():
 
     step = args.step
     with h5py.File(args.nwb_file, "r") as f:
-        ccf = f["general/localization/AnatomicalCoordinatesImageCCFv3"]
+        ccf = f["general/localization/AnatomicalCoordinatesCCFv3MappedOnSourceImage"]
         x = ccf["x"][::step, ::step].ravel()
         y = ccf["y"][::step, ::step].ravel()
         z = ccf["z"][::step, ::step].ravel()
