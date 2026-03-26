@@ -49,11 +49,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
 TURNER_DATA = Path(
-    "/home/heberto/development/conversions/turner-lab-to-nwb/data"
+    "/home/heberto/data/turner"
 )
 
 D99_LABELS_FILE = TURNER_DATA / "d99_atlas/D99_v2.0_dist/D99_v2.0_labels_semicolon.txt"
 NMT_LABELS_FILE = TURNER_DATA / "nmt_v2/NMT_v2.0_sym/tables_D99/D99_labeltable.txt"
+CHARM_LABELS_FILE = TURNER_DATA / "nmt_v2/NMT_v2.0_sym/tables_CHARM/CHARM_key_all.txt"
 MEBRAINS_LABELS_FILE = TURNER_DATA / "mebrains/MEBRAINS_labels.json"
 
 ATLAS_CONFIGS = {
@@ -66,12 +67,12 @@ ATLAS_CONFIGS = {
         "root_name": "D99 Atlas",
     },
     "nmt": {
-        "nifti": TURNER_DATA / "nmt_v2/NMT_v2.0_sym/NMT_v2.0_sym/D99_atlas_in_NMT_v2.0_sym.nii.gz",
-        "labels_type": "nmt",
+        "nifti": TURNER_DATA / "nmt_v2/NMT_v2.0_sym/NMT_v2.0_sym/supplemental_CHARM/CHARM_4_in_NMT_v2.0_sym.nii.gz",
+        "labels_type": "charm",
         "hdf5_path": "general/localization/NMTv2symAtlasCoordinates",
         "output_dir": PROJECT_ROOT / "data/atlases/nmt",
         "cache_file": SCRIPTS_DIR / "nmt_electrode_cache.jsonl",
-        "root_name": "NMT v2.0 sym Atlas",
+        "root_name": "NMT v2.0 sym (CHARM)",
     },
     "mebrains": {
         "nifti": TURNER_DATA / "mebrains/MEBRAINS_parcellation.nii.gz",
@@ -265,6 +266,137 @@ def parse_nmt_labels():
                 })
 
     return entries
+
+
+# ---------------------------------------------------------------------------
+# CHARM label parsing (native NMT v2 parcellation)
+# ---------------------------------------------------------------------------
+
+
+def parse_charm_labels():
+    """Parse CHARM_key_all.txt and return entries with hierarchy.
+
+    CHARM provides a hierarchical cortical parcellation for NMT v2.0-sym at
+    6 levels (level 1 = 4 lobes, level 6 = ~130 fine areas). The file is
+    ordered parent-before-child, so we track ancestors at each level to
+    determine parent-child relationships.
+
+    Returns list of dicts with keys: index, abbreviation, name, level,
+    parent_index (index of the parent entry, or None for level 1).
+    """
+    entries = []
+    # Track the most recent entry at each level to determine parentage
+    ancestors = {}
+
+    with open(CHARM_LABELS_FILE) as f:
+        next(f)  # skip header
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("\t")
+            index = int(parts[0])
+            abbreviation = parts[1]
+            full_name = parts[2].replace("_", " ")
+            first_level = int(parts[3])
+
+            # Parent is the most recent entry at the level above
+            if first_level == 1:
+                parent_index = None
+            else:
+                parent_index = ancestors.get(first_level - 1)
+
+            ancestors[first_level] = index
+
+            entries.append({
+                "index": index,
+                "abbreviation": abbreviation,
+                "name": full_name,
+                "level": first_level,
+                "parent_index": parent_index,
+            })
+
+    return entries
+
+
+def build_charm_structure_graph(entries, root_name="NMT v2.0 sym (CHARM)"):
+    """Build a structure graph from CHARM entries using their native hierarchy.
+
+    Unlike build_structure_graph (which uses category/subcategory), this
+    uses CHARM's own parent-child relationships from the level hierarchy.
+
+    Returns (tree_root, id_to_structure, parent_map, abbrev_to_id).
+    """
+    id_to_structure = {}
+    parent_map = {}
+    abbrev_to_id = {}
+
+    root = {
+        "id": ROOT_ID,
+        "acronym": "root",
+        "name": root_name,
+        "color_hex_triplet": "FFFFFF",
+        "parent_structure_id": None,
+        "children": [],
+    }
+    id_to_structure[ROOT_ID] = root
+    parent_map[ROOT_ID] = None
+
+    outside_node = {
+        "id": OUTSIDE_ID,
+        "acronym": "outside",
+        "name": "Outside atlas",
+        "color_hex_triplet": "888888",
+        "parent_structure_id": ROOT_ID,
+        "children": [],
+    }
+    id_to_structure[OUTSIDE_ID] = outside_node
+    parent_map[OUTSIDE_ID] = ROOT_ID
+
+    # Assign colors based on level 1 lobe
+    lobe_hues = {
+        "Frontal": 210,
+        "Parietal": 60,
+        "Temporal": 180,
+        "Occipital": 120,
+    }
+
+    # First pass: find which lobe each entry belongs to
+    entry_lobe = {}
+    current_lobe = None
+    for entry in entries:
+        if entry["level"] == 1:
+            current_lobe = entry["abbreviation"]
+        entry_lobe[entry["index"]] = current_lobe
+
+    for entry in entries:
+        label_id = entry["index"]
+        parent_index = entry["parent_index"]
+        parent_id = parent_index if parent_index is not None else ROOT_ID
+
+        lobe = entry_lobe.get(label_id, "Frontal")
+        hue = lobe_hues.get(lobe, 150)
+        lightness = 0.3 + 0.1 * entry["level"]
+
+        node = {
+            "id": label_id,
+            "acronym": entry["abbreviation"],
+            "name": entry["name"],
+            "color_hex_triplet": _hsl_to_hex(hue, 0.6, lightness),
+            "parent_structure_id": parent_id,
+            "children": [],
+        }
+        id_to_structure[label_id] = node
+        parent_map[label_id] = parent_id
+        abbrev_to_id[entry["abbreviation"]] = label_id
+
+    # Build tree by nesting children
+    for node_id, node in id_to_structure.items():
+        pid = node.get("parent_structure_id")
+        if pid is not None and pid in id_to_structure:
+            id_to_structure[pid]["children"].append(node)
+
+    return [root], id_to_structure, parent_map, abbrev_to_id
 
 
 # ---------------------------------------------------------------------------
@@ -1021,16 +1153,21 @@ def main():
     if config["labels_type"] == "d99":
         entries = parse_d99_labels()
         print(f"  Parsed {len(entries)} D99 label entries")
-    elif config["labels_type"] == "nmt":
-        entries = parse_nmt_labels()
-        print(f"  Parsed {len(entries)} NMT label entries")
+    elif config["labels_type"] == "charm":
+        entries = parse_charm_labels()
+        print(f"  Parsed {len(entries)} CHARM label entries")
     else:
         entries = parse_mebrains_labels()
         print(f"  Parsed {len(entries)} MEBRAINS label entries")
 
-    tree, id_to_structure, parent_map, abbrev_to_id = build_structure_graph(
-        entries, root_name=config["root_name"],
-    )
+    if config["labels_type"] == "charm":
+        tree, id_to_structure, parent_map, abbrev_to_id = build_charm_structure_graph(
+            entries, root_name=config["root_name"],
+        )
+    else:
+        tree, id_to_structure, parent_map, abbrev_to_id = build_structure_graph(
+            entries, root_name=config["root_name"],
+        )
 
     with open(data_dir / "structure_graph.json", "w") as f:
         json.dump(tree, f)
